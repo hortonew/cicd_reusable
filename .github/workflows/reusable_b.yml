@@ -7,5 +7,8 @@ jobs:
     B:
         runs-on: ubuntu-latest
         steps:
-            - name: Hello
+            - name: Echo
               run: echo "Reusable workflow B was triggered!"
+
+    call-c:
+        uses: ./.github/workflows/reusable_c.yml

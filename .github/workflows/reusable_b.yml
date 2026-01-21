@@ -1,0 +1,11 @@
+name: Reusable Workflow B
+
+on:
+    workflow_call:
+
+jobs:
+    greet:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Hello
+              run: echo "Reusable workflow B was triggered!"

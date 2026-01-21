@@ -1,4 +1,4 @@
-name: Reusable Workflow
+name: Reusable Workflow A
 
 on:
     workflow_call:
@@ -9,3 +9,5 @@ jobs:
         steps:
             - name: Hello
               run: echo "Reusable workflow A was triggered!"
+    call-b:
+        uses: ./.github/workflows/reusable_b.yml

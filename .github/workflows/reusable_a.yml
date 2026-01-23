@@ -9,5 +9,6 @@ jobs:
         steps:
             - name: Echo
               run: echo "Reusable workflow A was triggered!"
+
     call-b:
         uses: ./.github/workflows/reusable_b.yml

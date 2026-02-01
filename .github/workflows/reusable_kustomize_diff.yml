@@ -1,0 +1,136 @@
+name: Kustomize Diff (Reusable)
+
+on:
+    workflow_call:
+        inputs:
+            kustomize_root:
+                description: "Root path containing base/ and overlays/"
+                default: "configs/k8s/kustomize"
+                required: false
+                type: string
+            base_dir:
+                description: "Name of base directory"
+                default: "base"
+                required: false
+                type: string
+            overlays_dir:
+                description: "Name of overlays directory"
+                default: "overlays"
+                required: false
+                type: string
+            enable_kubeconform:
+                description: "Enable kubeconform validation"
+                default: true
+                required: false
+                type: boolean
+            kubeconform_version:
+                description: "Kubeconform version"
+                default: "0.7.0"
+                required: false
+                type: string
+
+jobs:
+    detect-changes:
+        name: Detect Changed Environments
+        runs-on: ubuntu-latest
+        outputs:
+            environments: ${{ steps.detect.outputs.environments }}
+            changed_files: ${{ steps.detect.outputs.changed_files }}
+        steps:
+            - name: Checkout Caller Repo (Full History)
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Checkout Reusable Workflow Repo (for scripts)
+              uses: actions/checkout@v6
+              with:
+                  repository: hortonew/cicd_reusable
+                  path: .actions/reusable-scripts
+                  ref: main
+
+            - name: Detect which environments changed
+              id: detect
+              run: |
+                  chmod +x .actions/reusable-scripts/.github/scripts/kustomize-detect-changes.sh
+                  .actions/reusable-scripts/.github/scripts/kustomize-detect-changes.sh \
+                    "${{ inputs.kustomize_root }}" \
+                    "${{ inputs.base_dir }}" \
+                    "${{ inputs.overlays_dir }}" \
+                    "${{ github.base_ref }}"
+
+    diff:
+        name: Kustomize Diff
+        runs-on: ubuntu-latest
+        needs: detect-changes
+        if: needs.detect-changes.outputs.environments != ''
+        permissions:
+            pull-requests: write
+        steps:
+            - name: Checkout Reusable Workflow Repo (for scripts)
+              uses: actions/checkout@v6
+              with:
+                  repository: hortonew/cicd_reusable
+                  path: .actions/reusable-scripts
+                  ref: main
+
+            - name: Checkout PR branch
+              uses: actions/checkout@v6
+              with:
+                  path: pr
+
+            - name: Checkout Base branch
+              uses: actions/checkout@v6
+              with:
+                  ref: ${{ github.base_ref }}
+                  path: base
+
+            - name: Cache kubeconform
+              if: inputs.enable_kubeconform
+              id: cache-kubeconform
+              uses: actions/cache@v5
+              with:
+                  path: /usr/local/bin/kubeconform
+                  key: kubeconform-${{ inputs.kubeconform_version }}
+
+            - name: Install kubeconform
+              if: inputs.enable_kubeconform && steps.cache-kubeconform.outputs.cache-hit != 'true'
+              run: |
+                  curl -sSL https://github.com/yannh/kubeconform/releases/download/v${{ inputs.kubeconform_version }}/kubeconform-linux-amd64.tar.gz | tar xz
+                  sudo mv kubeconform /usr/local/bin/
+
+            - name: Kubeconform Validate
+              if: inputs.enable_kubeconform
+              id: validate
+              run: |
+                  chmod +x .actions/reusable-scripts/.github/scripts/kustomize-kubeconform-validate.sh
+                  # Note: validate script expects 'pr/' folder which we have
+                  .actions/reusable-scripts/.github/scripts/kustomize-kubeconform-validate.sh \
+                    "${{ needs.detect-changes.outputs.environments }}" \
+                    "${{ inputs.kustomize_root }}/${{ inputs.overlays_dir }}"
+
+            - name: Generate diffs
+              id: diff
+              run: |
+                  chmod +x .actions/reusable-scripts/.github/scripts/kustomize-diff.sh
+                  # Note: diff script expects 'base/' and 'pr/' folders which we have
+                  .actions/reusable-scripts/.github/scripts/kustomize-diff.sh \
+                    "${{ needs.detect-changes.outputs.environments }}" \
+                    "${{ inputs.kustomize_root }}/${{ inputs.overlays_dir }}"
+
+            - name: Comment on PR
+              uses: actions/github-script@v8
+              with:
+                  script: |
+                      const script = require('./.actions/reusable-scripts/.github/scripts/kustomize-comment-on-pr.js')
+                      await script({
+                        github,
+                        context,
+                        core,
+                        inputs: {
+                          environments: '${{ needs.detect-changes.outputs.environments }}',
+                          changedFiles: '${{ needs.detect-changes.outputs.changed_files }}',
+                          kubeconformEnabled: ${{ inputs.enable_kubeconform }},
+                          validationFailed: '${{ steps.validate.outputs.failed }}' === 'true'
+                        }
+                      })

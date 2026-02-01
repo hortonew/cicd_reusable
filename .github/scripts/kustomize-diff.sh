@@ -1,0 +1,66 @@
+#!/bin/bash
+set -euo pipefail
+
+# Kustomize Diff Script
+# Generates diffs between base and PR branches
+#
+# Usage: ./kustomize-diff.sh <environments> [overlays_path]
+# Example: ./kustomize-diff.sh "dev staging prod" "configs/k8s/kustomize/overlays"
+#
+# Expects:
+#   - base/ directory with base branch checkout (renamed from main/)
+#   - pr/ directory with PR branch checkout
+#
+# Outputs:
+#   - diff_output.md with formatted diff for PR comment
+
+ENVS="$1"
+OVERLAYS_PATH="${2:-configs/k8s/kustomize/overlays}"
+
+DIFF=""
+
+for env in $ENVS; do
+    echo "Diffing $env..."
+    
+    # Changed "main/" to "base/" here
+    MAIN_OUTPUT=$(kubectl kustomize "base/$OVERLAYS_PATH/$env" 2>&1 || echo "Error building base")
+    PR_OUTPUT=$(kubectl kustomize "pr/$OVERLAYS_PATH/$env" 2>&1 || echo "Error building PR")
+    
+    # Write to temp files for git diff
+    echo "$MAIN_OUTPUT" > /tmp/base.yaml
+    echo "$PR_OUTPUT" > /tmp/pr.yaml
+    
+    ENV_DIFF=$(git diff --no-index --no-color /tmp/base.yaml /tmp/pr.yaml 2>/dev/null | tail -n +5 || true)
+    
+    if [ -n "$ENV_DIFF" ]; then
+        # Count additions and removals
+        ADDS=$(echo "$ENV_DIFF" | grep -cE '^\+[^+]' || true)
+        DELS=$(echo "$ENV_DIFF" | grep -cE '^-[^-]' || true)
+        ADDS=${ADDS:-0}
+        DELS=${DELS:-0}
+        
+        DIFF="$DIFF
+<details>
+<summary><strong>$env</strong> (+$ADDS, -$DELS)</summary>
+
+\`\`\`diff
+$ENV_DIFF
+\`\`\`
+
+</details>
+"
+    else
+        DIFF="$DIFF
+<details>
+<summary><strong>$env</strong> (no changes)</summary>
+
+No changes detected.
+
+</details>
+"
+    fi
+done
+
+# Write output
+echo "$DIFF" > diff_output.md
+echo "Diff output written to diff_output.md"

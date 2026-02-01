@@ -19,7 +19,9 @@ BASE_REF="${4:-main}"
 # Ensure we have the base ref
 git fetch origin "$BASE_REF" --depth=1
 
-CHANGED_FILES=$(git diff --name-only "origin/$BASE_REF" -- "$KUSTOMIZE_ROOT/")
+# Use --no-renames so that renamed files are reported as add+delete rather than rename
+# This ensures deleted environments are properly detected
+CHANGED_FILES=$(git diff --no-renames --name-only "origin/$BASE_REF" -- "$KUSTOMIZE_ROOT/")
 echo "Changed files:"
 echo "$CHANGED_FILES"
 
@@ -27,8 +29,15 @@ echo "$CHANGED_FILES"
 CHANGED_FILES_LIST=$(echo "$CHANGED_FILES" | tr '\n' ',' | sed 's/,$//')
 echo "changed_files=$CHANGED_FILES_LIST" >> "$GITHUB_OUTPUT"
 
-# Get all environment names from overlays folder
-ALL_ENVS=$(ls -1 "$KUSTOMIZE_ROOT/$OVERLAYS_DIR/" | xargs)
+# Get all environment names from overlays folder (union of PR and Base branches)
+# This ensures we catch deleted environments (in Base but not PR) and new environments (in PR but not Base)
+PR_ENVS=$(ls -1 "$KUSTOMIZE_ROOT/$OVERLAYS_DIR/" 2>/dev/null || true)
+
+# Normalize path for git ls-tree (remove potential multiple slashes)
+GIT_PATH="${KUSTOMIZE_ROOT%/}/${OVERLAYS_DIR%/}"
+BASE_ENVS=$(git ls-tree -d --name-only "origin/$BASE_REF:$GIT_PATH" 2>/dev/null | xargs -n 1 basename || true)
+
+ALL_ENVS=$(echo "$PR_ENVS $BASE_ENVS" | tr ' ' '\n' | sort -u | xargs)
 echo "Available environments: $ALL_ENVS"
 
 ENVS=""

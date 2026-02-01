@@ -22,13 +22,34 @@ DIFF=""
 for env in $ENVS; do
     echo "Diffing $env..."
     
-    # Changed "main/" to "base/" here
-    MAIN_OUTPUT=$(kubectl kustomize "base/$OVERLAYS_PATH/$env" 2>&1 || echo "Error building base")
-    PR_OUTPUT=$(kubectl kustomize "pr/$OVERLAYS_PATH/$env" 2>&1 || echo "Error building PR")
+    # Build Base (check if exists first to handle new environments)
+    if [ -d "base/$OVERLAYS_PATH/$env" ]; then
+        MAIN_OUTPUT=$(kubectl kustomize "base/$OVERLAYS_PATH/$env" 2>&1 || echo "Error building base")
+    else
+        MAIN_OUTPUT=""
+    fi
+
+    # Build PR (check if exists first to handle deleted environments)
+    if [ -d "pr/$OVERLAYS_PATH/$env" ]; then
+        PR_OUTPUT=$(kubectl kustomize "pr/$OVERLAYS_PATH/$env" 2>&1 || echo "Error building PR")
+    else
+        PR_OUTPUT=""
+    fi
     
     # Write to temp files for git diff
-    echo "$MAIN_OUTPUT" > /tmp/base.yaml
-    echo "$PR_OUTPUT" > /tmp/pr.yaml
+    if [ -z "$MAIN_OUTPUT" ]; then
+        # Empty file if env didn't exist
+        : > /tmp/base.yaml
+    else
+        echo "$MAIN_OUTPUT" > /tmp/base.yaml
+    fi
+
+    if [ -z "$PR_OUTPUT" ]; then
+        # Empty file if env was deleted
+        : > /tmp/pr.yaml
+    else
+        echo "$PR_OUTPUT" > /tmp/pr.yaml
+    fi
     
     ENV_DIFF=$(git diff --no-index --no-color /tmp/base.yaml /tmp/pr.yaml 2>/dev/null | tail -n +5 || true)
     

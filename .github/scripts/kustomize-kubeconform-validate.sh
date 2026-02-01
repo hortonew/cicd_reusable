@@ -22,6 +22,13 @@ VALIDATION_FAILED=false
 
 for env in $ENVS; do
     echo "Validating $env..."
+
+    # Skip validation if environment is deleted
+    if [ ! -d "pr/$OVERLAYS_PATH/$env" ]; then
+        echo "Environment $env deleted, skipping validation"
+        continue
+    fi
+
     OUTPUT=$(kubectl kustomize "pr/$OVERLAYS_PATH/$env" | kubeconform -summary -output json 2>&1) || true
 
     # Check for errors (statusInvalid or invalid)
